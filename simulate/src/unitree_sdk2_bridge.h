@@ -349,8 +349,8 @@ public:
 
 private:
     // Head camera constants (D435i defaults)
-    static constexpr int CAM_WIDTH = 640;
-    static constexpr int CAM_HEIGHT = 480;
+    static constexpr int CAM_WIDTH = 57; //640;
+    static constexpr int CAM_HEIGHT = 32; //480;
 
     // Camera state
     int head_cam_id_ = -1;
