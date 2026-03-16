@@ -8,11 +8,15 @@
 #include <unitree/dds_wrapper/robots/g1/g1.h>
 #include <unitree/idl/hg/BmsState_.hpp>
 #include <unitree/idl/hg/IMUState_.hpp>
+#include <unitree/idl/go2/Go2FrontVideoData_.hpp>
 
+#include <GLFW/glfw3.h>
 #include <iostream>
 
 #include "param.h"
 #include "physics_joystick.h"
+
+extern GLFWwindow* g_offscreen_window;
 
 #define MOTOR_SENSOR_NUM 3
 
@@ -275,6 +279,28 @@ public:
         secondary_imustate = std::make_unique<IMUState_t>("rt/secondary_imu");
     }
 
+    ~G1Bridge()
+    {
+        if (cam_initialized_) {
+            mjr_freeContext(&cam_con_);
+            mjv_freeScene(&cam_scn_);
+        }
+    }
+
+    void start()
+    {
+        RobotBridge::start();
+
+        // Start head camera thread if camera exists in the model
+        head_cam_id_ = mj_name2id(mj_model_, mjOBJ_CAMERA, "head_cam");
+        if (head_cam_id_ >= 0 && g_offscreen_window) {
+            head_camera_pub_ = std::make_unique<HeadCameraData_t>("rt/head_camera");
+            cam_thread_ = std::make_shared<unitree::common::RecurrentThread>(
+                "head_camera", UT_CPU_ID_NONE, 30, [this]() { this->renderCamera(); });
+            std::cout << "Head camera publisher started on rt/head_camera (30fps)" << std::endl;
+        }
+    }
+
     void run() override
     {
         RobotBridge::run();
@@ -320,4 +346,69 @@ public:
     using IMUState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::IMUState_>;
     std::unique_ptr<BmsState_t> bmsstate;
     std::unique_ptr<IMUState_t> secondary_imustate;
+
+private:
+    // Head camera constants (D435i defaults)
+    static constexpr int CAM_WIDTH = 640;
+    static constexpr int CAM_HEIGHT = 480;
+
+    // Camera state
+    int head_cam_id_ = -1;
+    bool cam_initialized_ = false;
+    mjvScene cam_scn_;
+    mjvCamera cam_cam_;
+    mjvOption cam_opt_;
+    mjrContext cam_con_;
+    mjrRect cam_viewport_ = {0, 0, CAM_WIDTH, CAM_HEIGHT};
+    std::vector<unsigned char> cam_rgb_;
+
+    using HeadCameraData_t = unitree::robot::RealTimePublisher<unitree_go::msg::dds_::Go2FrontVideoData_>;
+    std::unique_ptr<HeadCameraData_t> head_camera_pub_;
+    unitree::common::RecurrentThreadPtr cam_thread_;
+
+    void initCamera()
+    {
+        if (!g_offscreen_window || head_cam_id_ < 0) return;
+
+        glfwMakeContextCurrent(g_offscreen_window);
+
+        mjv_defaultScene(&cam_scn_);
+        mjv_makeScene(mj_model_, &cam_scn_, 2000);
+        mjr_makeContext(mj_model_, &cam_con_, mjFONTSCALE_100);
+
+        mjv_defaultCamera(&cam_cam_);
+        cam_cam_.type = mjCAMERA_FIXED;
+        cam_cam_.fixedcamid = head_cam_id_;
+
+        mjv_defaultOption(&cam_opt_);
+
+        cam_rgb_.resize(CAM_WIDTH * CAM_HEIGHT * 3);
+
+        cam_initialized_ = true;
+        std::cout << "Head camera initialized (" << CAM_WIDTH << "x" << CAM_HEIGHT << ")" << std::endl;
+    }
+
+    void renderCamera()
+    {
+        if (!cam_initialized_) {
+            initCamera();
+            if (!cam_initialized_) return;
+        }
+        if (!mj_data_) return;
+
+        // Update scene geometry from current sim state
+        mjv_updateScene(mj_model_, mj_data_, &cam_opt_, nullptr, &cam_cam_, mjCAT_ALL, &cam_scn_);
+
+        // Render to offscreen buffer and read pixels
+        mjr_setBuffer(mjFB_OFFSCREEN, &cam_con_);
+        mjr_render(cam_viewport_, &cam_scn_, &cam_con_);
+        mjr_readPixels(cam_rgb_.data(), nullptr, cam_viewport_, &cam_con_);
+
+        // Publish raw RGB (bottom-up, 640x480x3)
+        if (head_camera_pub_->trylock()) {
+            head_camera_pub_->msg_.time_frame() = static_cast<uint64_t>(mj_data_->time * 1e6);
+            head_camera_pub_->msg_.video720p().assign(cam_rgb_.begin(), cam_rgb_.end());
+            head_camera_pub_->unlockAndPublish();
+        }
+    }
 };

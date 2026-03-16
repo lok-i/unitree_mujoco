@@ -38,6 +38,9 @@
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
 #define NUM_MOTOR_IDL_GO 20
 
+// Offscreen GL window for head camera rendering (created from main thread)
+GLFWwindow* g_offscreen_window = nullptr;
+
 extern "C"
 {
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -682,6 +685,19 @@ int main(int argc, char **argv)
   auto sim = std::make_unique<mj::Simulate>(
     std::make_unique<mj::GlfwAdapter>(),
     &cam, &opt, &pert, /* is_passive = */ false);
+
+  // Create invisible GLFW window for offscreen camera rendering
+  // Must be created from main thread; camera thread will claim its GL context later
+  GLFWwindow* main_window = static_cast<mj::GlfwAdapter*>(sim->platform_ui.get())->window_;
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  g_offscreen_window = glfwCreateWindow(640, 480, "offscreen", nullptr, nullptr);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+  if (g_offscreen_window) {
+    // Restore main window's GL context (creating the offscreen window stole it)
+    glfwMakeContextCurrent(main_window);
+  } else {
+    std::cerr << "Warning: failed to create offscreen window, head camera disabled" << std::endl;
+  }
 
   std::thread unitree_thread(UnitreeSdk2BridgeThread, nullptr);
 
