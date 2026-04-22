@@ -8,10 +8,21 @@
 #include <unitree/dds_wrapper/robots/g1/g1.h>
 #include <unitree/idl/hg/BmsState_.hpp>
 #include <unitree/idl/hg/IMUState_.hpp>
-#include <unitree/idl/go2/Go2FrontVideoData_.hpp>
+
+#include <opencv2/opencv.hpp>
+
+#include <arpa/inet.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <GLFW/glfw3.h>
+#include <atomic>
+#include <cstring>
 #include <iostream>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #include "param.h"
 #include "physics_joystick.h"
@@ -281,6 +292,18 @@ public:
 
     ~G1Bridge()
     {
+        tcp_running_.store(false);
+        if (tcp_listen_fd_ >= 0) {
+            ::shutdown(tcp_listen_fd_, SHUT_RDWR);
+            ::close(tcp_listen_fd_);
+            tcp_listen_fd_ = -1;
+        }
+        if (tcp_accept_thread_.joinable()) tcp_accept_thread_.join();
+        {
+            std::lock_guard<std::mutex> lk(clients_mutex_);
+            for (int fd : clients_) ::close(fd);
+            clients_.clear();
+        }
         if (cam_initialized_) {
             mjr_freeContext(&cam_con_);
             mjv_freeScene(&cam_scn_);
@@ -294,10 +317,14 @@ public:
         // Start head camera thread if camera exists in the model
         head_cam_id_ = mj_name2id(mj_model_, mjOBJ_CAMERA, "head_cam");
         if (head_cam_id_ >= 0 && g_offscreen_window) {
-            head_camera_pub_ = std::make_unique<HeadCameraData_t>("rt/head_camera");
+            if (!startTcpServer()) {
+                std::cerr << "Head camera TCP server failed to start; camera disabled" << std::endl;
+                return;
+            }
             cam_thread_ = std::make_shared<unitree::common::RecurrentThread>(
-                "head_camera", UT_CPU_ID_NONE, 30, [this]() { this->renderCamera(); });
-            std::cout << "Head camera publisher started on rt/head_camera (30fps)" << std::endl;
+                "head_camera", UT_CPU_ID_NONE, 33, [this]() { this->renderCamera(); });
+            std::cout << "Head camera TCP server started on port " << TCP_PORT
+                      << " (" << CAM_WIDTH << "x" << CAM_HEIGHT << " JPEG, ~30fps)" << std::endl;
         }
     }
 
@@ -348,9 +375,12 @@ public:
     std::unique_ptr<IMUState_t> secondary_imustate;
 
 private:
-    // Head camera constants (D435i defaults)
-    static constexpr int CAM_WIDTH = 57; //640;
-    static constexpr int CAM_HEIGHT = 32; //480;
+    // Head camera resolution — matches real camera_streamer.py wire format
+    // so the ROS 2 theia_tiny_node treats sim and real identically.
+    static constexpr int CAM_WIDTH = 640;
+    static constexpr int CAM_HEIGHT = 480;
+    static constexpr int JPEG_QUALITY = 80;
+    static constexpr uint16_t TCP_PORT = 5555;
 
     // Camera state
     int head_cam_id_ = -1;
@@ -360,11 +390,59 @@ private:
     mjvOption cam_opt_;
     mjrContext cam_con_;
     mjrRect cam_viewport_ = {0, 0, CAM_WIDTH, CAM_HEIGHT};
-    std::vector<unsigned char> cam_rgb_;
-
-    using HeadCameraData_t = unitree::robot::RealTimePublisher<unitree_go::msg::dds_::Go2FrontVideoData_>;
-    std::unique_ptr<HeadCameraData_t> head_camera_pub_;
+    std::vector<unsigned char> cam_rgb_;  // bottom-up RGB from mjr_readPixels
     unitree::common::RecurrentThreadPtr cam_thread_;
+
+    // TCP broadcast state
+    int tcp_listen_fd_ = -1;
+    std::atomic<bool> tcp_running_{false};
+    std::thread tcp_accept_thread_;
+    std::vector<int> clients_;
+    std::mutex clients_mutex_;
+
+    bool startTcpServer()
+    {
+        tcp_listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (tcp_listen_fd_ < 0) return false;
+
+        int yes = 1;
+        ::setsockopt(tcp_listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(TCP_PORT);
+        if (::bind(tcp_listen_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+            std::cerr << "bind(" << TCP_PORT << ") failed: " << std::strerror(errno) << std::endl;
+            ::close(tcp_listen_fd_);
+            tcp_listen_fd_ = -1;
+            return false;
+        }
+        if (::listen(tcp_listen_fd_, 5) < 0) {
+            ::close(tcp_listen_fd_);
+            tcp_listen_fd_ = -1;
+            return false;
+        }
+
+        tcp_running_.store(true);
+        tcp_accept_thread_ = std::thread([this]() {
+            while (tcp_running_.load()) {
+                sockaddr_in cli{};
+                socklen_t cli_len = sizeof(cli);
+                int fd = ::accept(tcp_listen_fd_, reinterpret_cast<sockaddr *>(&cli), &cli_len);
+                if (fd < 0) {
+                    if (!tcp_running_.load()) break;
+                    continue;
+                }
+                int one = 1;
+                ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+                std::lock_guard<std::mutex> lk(clients_mutex_);
+                clients_.push_back(fd);
+                std::cout << "Head camera client connected (total: " << clients_.size() << ")" << std::endl;
+            }
+        });
+        return true;
+    }
 
     void initCamera()
     {
@@ -396,19 +474,51 @@ private:
         }
         if (!mj_data_) return;
 
-        // Update scene geometry from current sim state
-        mjv_updateScene(mj_model_, mj_data_, &cam_opt_, nullptr, &cam_cam_, mjCAT_ALL, &cam_scn_);
+        // Skip the render + encode entirely if no one is listening.
+        {
+            std::lock_guard<std::mutex> lk(clients_mutex_);
+            if (clients_.empty()) return;
+        }
 
-        // Render to offscreen buffer and read pixels
+        // Render offscreen, read bottom-up RGB.
+        mjv_updateScene(mj_model_, mj_data_, &cam_opt_, nullptr, &cam_cam_, mjCAT_ALL, &cam_scn_);
         mjr_setBuffer(mjFB_OFFSCREEN, &cam_con_);
         mjr_render(cam_viewport_, &cam_scn_, &cam_con_);
         mjr_readPixels(cam_rgb_.data(), nullptr, cam_viewport_, &cam_con_);
 
-        // Publish raw RGB (bottom-up, 640x480x3)
-        if (head_camera_pub_->trylock()) {
-            head_camera_pub_->msg_.time_frame() = static_cast<uint64_t>(mj_data_->time * 1e6);
-            head_camera_pub_->msg_.video720p().assign(cam_rgb_.begin(), cam_rgb_.end());
-            head_camera_pub_->unlockAndPublish();
+        // Wrap as RGB, convert to BGR, flip vertical (mjr_readPixels is bottom-up),
+        // then JPEG-encode. BGR matches camera_streamer.py's realsense output so
+        // the receiver's channel handling is identical for sim and real.
+        cv::Mat rgb(CAM_HEIGHT, CAM_WIDTH, CV_8UC3, cam_rgb_.data());
+        cv::Mat bgr;
+        cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
+        cv::flip(bgr, bgr, 0);
+
+        std::vector<uchar> jpg;
+        cv::imencode(".jpg", bgr, jpg, {cv::IMWRITE_JPEG_QUALITY, JPEG_QUALITY});
+
+        uint32_t length = static_cast<uint32_t>(jpg.size());
+        std::vector<uint8_t> payload(4 + jpg.size());
+        std::memcpy(payload.data(), &length, 4);  // little-endian on x86/ARM
+        std::memcpy(payload.data() + 4, jpg.data(), jpg.size());
+
+        // Broadcast to all clients; drop any that fail.
+        std::lock_guard<std::mutex> lk(clients_mutex_);
+        for (auto it = clients_.begin(); it != clients_.end(); ) {
+            size_t sent = 0;
+            bool ok = true;
+            while (sent < payload.size()) {
+                ssize_t n = ::send(*it, payload.data() + sent, payload.size() - sent, MSG_NOSIGNAL);
+                if (n <= 0) { ok = false; break; }
+                sent += static_cast<size_t>(n);
+            }
+            if (!ok) {
+                ::close(*it);
+                it = clients_.erase(it);
+                std::cout << "Head camera client disconnected (remaining: " << clients_.size() << ")" << std::endl;
+            } else {
+                ++it;
+            }
         }
     }
 };

@@ -12,12 +12,14 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(OpenCV REQUIRED)
 
 
 include_directories(
   mujoco/include
   mujoco/simulate
   src/lodepng
+  ${OpenCV_INCLUDE_DIRS}
 )
 link_directories(mujoco/lib)
 
@@ -39,6 +41,7 @@ link_libraries(
   unitree_sdk2
   boost_program_options
   fmt
+  ${OpenCV_LIBS}
 )
 
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
