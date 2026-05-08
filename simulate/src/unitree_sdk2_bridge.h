@@ -324,7 +324,7 @@ public:
             cam_thread_ = std::make_shared<unitree::common::RecurrentThread>(
                 "head_camera", UT_CPU_ID_NONE, 33, [this]() { this->renderCamera(); });
             std::cout << "Head camera TCP server started on port " << TCP_PORT
-                      << " (" << CAM_WIDTH << "x" << CAM_HEIGHT << " JPEG, ~30fps)" << std::endl;
+                      << " (" << CAM_WIDTH << "x" << CAM_HEIGHT << " PNG, ~30fps)" << std::endl;
         }
     }
 
@@ -379,7 +379,7 @@ private:
     // so the ROS 2 theia_tiny_node treats sim and real identically.
     static constexpr int CAM_WIDTH = 640;
     static constexpr int CAM_HEIGHT = 480;
-    static constexpr int JPEG_QUALITY = 80;
+    static constexpr int PNG_COMPRESSION = 1;  // 0=none, 9=max; lossless either way
     static constexpr uint16_t TCP_PORT = 5555;
 
     // Camera state
@@ -487,20 +487,20 @@ private:
         mjr_readPixels(cam_rgb_.data(), nullptr, cam_viewport_, &cam_con_);
 
         // Wrap as RGB, convert to BGR, flip vertical (mjr_readPixels is bottom-up),
-        // then JPEG-encode. BGR matches camera_streamer.py's realsense output so
-        // the receiver's channel handling is identical for sim and real.
+        // then PNG-encode (lossless). BGR matches camera_streamer.py's realsense
+        // output so the receiver's channel handling is identical for sim and real.
         cv::Mat rgb(CAM_HEIGHT, CAM_WIDTH, CV_8UC3, cam_rgb_.data());
         cv::Mat bgr;
         cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
         cv::flip(bgr, bgr, 0);
 
-        std::vector<uchar> jpg;
-        cv::imencode(".jpg", bgr, jpg, {cv::IMWRITE_JPEG_QUALITY, JPEG_QUALITY});
+        std::vector<uchar> png;
+        cv::imencode(".png", bgr, png, {cv::IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION});
 
-        uint32_t length = static_cast<uint32_t>(jpg.size());
-        std::vector<uint8_t> payload(4 + jpg.size());
+        uint32_t length = static_cast<uint32_t>(png.size());
+        std::vector<uint8_t> payload(4 + png.size());
         std::memcpy(payload.data(), &length, 4);  // little-endian on x86/ARM
-        std::memcpy(payload.data() + 4, jpg.data(), jpg.size());
+        std::memcpy(payload.data() + 4, png.data(), png.size());
 
         // Broadcast to all clients; drop any that fail.
         std::lock_guard<std::mutex> lk(clients_mutex_);
