@@ -24,6 +24,8 @@
 #include <thread>
 #include <vector>
 
+#include <vision_encoders/frame_wire.hpp>
+
 #include "param.h"
 #include "physics_joystick.h"
 
@@ -391,6 +393,8 @@ private:
     mjrContext cam_con_;
     mjrRect cam_viewport_ = {0, 0, CAM_WIDTH, CAM_HEIGHT};
     std::vector<unsigned char> cam_rgb_;  // bottom-up RGB from mjr_readPixels
+    std::vector<float> cam_depth_;        // bottom-up nonlinear GL depth
+    std::vector<uint16_t> cam_depth_mm_;  // linearized + downscaled, wire units
     unitree::common::RecurrentThreadPtr cam_thread_;
 
     // TCP broadcast state
@@ -461,9 +465,53 @@ private:
         mjv_defaultOption(&cam_opt_);
 
         cam_rgb_.resize(CAM_WIDTH * CAM_HEIGHT * 3);
+        if (param::config.camera_depth) {
+            cam_depth_.resize(CAM_WIDTH * CAM_HEIGHT);
+            cam_depth_mm_.resize(param::config.camera_depth_width *
+                                 param::config.camera_depth_height);
+        }
 
         cam_initialized_ = true;
-        std::cout << "Head camera initialized (" << CAM_WIDTH << "x" << CAM_HEIGHT << ")" << std::endl;
+        std::cout << "Head camera initialized (" << CAM_WIDTH << "x" << CAM_HEIGHT << ")";
+        if (param::config.camera_depth) {
+            std::cout << " + depth (" << param::config.camera_depth_width << "x"
+                      << param::config.camera_depth_height << ")";
+        }
+        std::cout << std::endl;
+    }
+
+    /// Linearize the GL depth buffer to metres, flip, downscale NEAREST, emit
+    /// millimetres — the same units and plane size camera_streamer.py sends, so
+    /// sys1's perception cannot tell sim from hardware.
+    void appendDepthPlane(std::vector<uint8_t> & body, float colour_fy)
+    {
+        const int dw = param::config.camera_depth_width;
+        const int dh = param::config.camera_depth_height;
+        const float extent = static_cast<float>(mj_model_->stat.extent);
+        const float znear = extent * static_cast<float>(mj_model_->vis.map.znear);
+        const float zfar = extent * static_cast<float>(mj_model_->vis.map.zfar);
+
+        cv::Mat gl(CAM_HEIGHT, CAM_WIDTH, CV_32FC1, cam_depth_.data());
+        cv::Mat metres(CAM_HEIGHT, CAM_WIDTH, CV_32FC1);
+        for (int r = 0; r < CAM_HEIGHT; ++r) {
+            const float * src = gl.ptr<float>(CAM_HEIGHT - 1 - r);   // bottom-up
+            float * dst = metres.ptr<float>(r);
+            for (int c = 0; c < CAM_WIDTH; ++c) {
+                dst[c] = znear * zfar / (zfar - src[c] * (zfar - znear));
+            }
+        }
+        cv::Mat small;
+        cv::resize(metres, small, cv::Size(dw, dh), 0, 0, cv::INTER_NEAREST);
+        cv::Mat mm(dh, dw, CV_16UC1, cam_depth_mm_.data());
+        small.convertTo(mm, CV_16UC1, 1000.0);
+
+        const float s = static_cast<float>(dw) / CAM_WIDTH;
+        vision_encoders::wire::append_plane(
+            body, vision_encoders::wire::Kind::DEPTH,
+            vision_encoders::wire::Fmt::RAW_U16_MM, static_cast<uint16_t>(dw),
+            static_cast<uint16_t>(dh), colour_fy * s, colour_fy * s,
+            dw / 2.0f, dh / 2.0f, cam_depth_mm_.data(),
+            static_cast<uint32_t>(cam_depth_mm_.size() * sizeof(uint16_t)));
     }
 
     void renderCamera()
@@ -484,7 +532,9 @@ private:
         mjv_updateScene(mj_model_, mj_data_, &cam_opt_, nullptr, &cam_cam_, mjCAT_ALL, &cam_scn_);
         mjr_setBuffer(mjFB_OFFSCREEN, &cam_con_);
         mjr_render(cam_viewport_, &cam_scn_, &cam_con_);
-        mjr_readPixels(cam_rgb_.data(), nullptr, cam_viewport_, &cam_con_);
+        const bool want_depth = param::config.camera_depth != 0;
+        mjr_readPixels(cam_rgb_.data(), want_depth ? cam_depth_.data() : nullptr,
+                       cam_viewport_, &cam_con_);
 
         // Wrap as RGB, convert to BGR, flip vertical (mjr_readPixels is bottom-up),
         // then PNG-encode (lossless). BGR matches camera_streamer.py's realsense
@@ -497,10 +547,26 @@ private:
         std::vector<uchar> png;
         cv::imencode(".png", bgr, png, {cv::IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION});
 
-        uint32_t length = static_cast<uint32_t>(png.size());
-        std::vector<uint8_t> payload(4 + png.size());
+        std::vector<uint8_t> body;
+        if (!want_depth) {
+            body.assign(png.begin(), png.end());       // legacy wire, unchanged
+        } else {
+            const float fovy = static_cast<float>(mj_model_->cam_fovy[head_cam_id_]);
+            const float fy = (CAM_HEIGHT / 2.0f) /
+                             std::tan(fovy * static_cast<float>(M_PI) / 360.0f);
+            body = vision_encoders::wire::begin_payload(2);
+            vision_encoders::wire::append_plane(
+                body, vision_encoders::wire::Kind::COLOR,
+                vision_encoders::wire::Fmt::PNG, CAM_WIDTH, CAM_HEIGHT,
+                fy, fy, CAM_WIDTH / 2.0f, CAM_HEIGHT / 2.0f, png.data(),
+                static_cast<uint32_t>(png.size()));
+            appendDepthPlane(body, fy);
+        }
+
+        uint32_t length = static_cast<uint32_t>(body.size());
+        std::vector<uint8_t> payload(4 + body.size());
         std::memcpy(payload.data(), &length, 4);  // little-endian on x86/ARM
-        std::memcpy(payload.data() + 4, png.data(), png.size());
+        std::memcpy(payload.data() + 4, body.data(), body.size());
 
         // Broadcast to all clients; drop any that fail.
         std::lock_guard<std::mutex> lk(clients_mutex_);

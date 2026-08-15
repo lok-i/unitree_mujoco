@@ -1,6 +1,6 @@
 robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1"
-# robot_scene: "/HDD/drcl_projects/assets/source/multi_objects/scenes/scene_g1_29dof_largetable.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
-robot_scene: "/HDD/drcl_projects/assets/source/multi_objects/scenes/scene_g1_29dof_largetable.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
+# robot_scene: "/home/loki/unitree_ros2/unitree_mujoco/unitree_robots/g1/scene_29dof.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
+robot_scene: "/home/loki/drcl_projects/vibe/dependencies/assets/source/omni_objects/scenes/g1_29dof_cube.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
 
 domain_id: 1  # Simulation domain; must match setup_local.sh ROS_DOMAIN_ID.
 interface: "lo" # Interface 
@@ -13,3 +13,7 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 print_scene_information: 1 # Print link, joint and sensors information of robot
 
 enable_elastic_band: 0 # Virtual spring band, used for lifting h1
+
+camera_depth: 1 # Attach a depth plane to the head-camera wire (sys1 needs it)
+camera_depth_width: 160  # sys1 classifies at 160 px; matches camera_streamer.py
+camera_depth_height: 120

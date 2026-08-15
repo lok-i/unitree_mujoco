@@ -26,6 +26,12 @@ inline struct SimulationConfig
     int enable_elastic_band;
     int band_attached_link = 0;
 
+    /// Attach a depth plane to the head-camera wire (multi-plane record, see
+    /// vision_encoders/frame_wire.hpp). Off = the legacy colour-only stream.
+    int camera_depth = 0;
+    int camera_depth_width = 160;
+    int camera_depth_height = 120;
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -41,6 +47,10 @@ inline struct SimulationConfig
             joystick_bits = cfg["joystick_bits"].as<int>();
             print_scene_information = cfg["print_scene_information"].as<int>();
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
+            // Optional: absent keys keep the defaults, so old configs load.
+            if (cfg["camera_depth"]) camera_depth = cfg["camera_depth"].as<int>();
+            if (cfg["camera_depth_width"]) camera_depth_width = cfg["camera_depth_width"].as<int>();
+            if (cfg["camera_depth_height"]) camera_depth_height = cfg["camera_depth_height"].as<int>();
         }
         catch(const std::exception& e)
         {
