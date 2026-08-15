@@ -2,7 +2,7 @@ robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1"
 # robot_scene: "/HDD/drcl_projects/assets/source/multi_objects/scenes/scene_g1_29dof_largetable.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
 robot_scene: "/HDD/drcl_projects/assets/source/multi_objects/scenes/scene_g1_29dof_largetable.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
 
-domain_id: 0  # Domain id
+domain_id: 1  # Simulation domain; must match setup_local.sh ROS_DOMAIN_ID.
 interface: "lo" # Interface 
 
 use_joystick: 1 # Simulate Unitree WirelessController using a gamepad
