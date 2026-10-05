@@ -94,6 +94,26 @@ explicit. From `simulate/build`, start the flat scene with:
 
 Use `scene_terrain.xml` instead for the rough-terrain scene.
 
+### G1 head-camera stream
+
+The C++ simulator includes an opt-in G1 model with Vibe's downward-facing
+`head_cam`. From `simulate/build`, run:
+
+```bash
+./unitree_mujoco -r g1 -s scene_29dof_with_camera.xml
+```
+
+When the selected model contains `head_cam`, the simulator listens on TCP port
+`5555` and emits 640x480 lossless RGB plus 160x120 depth in millimeters. The
+stream uses a length-prefixed, self-describing `VD1` record and has no build-time
+dependency on the consumer. Port, frame rate, and depth dimensions are set in
+`simulate/config.yaml`; `--camera_port` and `--camera_fps` override the two most
+common settings.
+
+The standard `g1_29dof.xml` and `scene_29dof.xml` remain unchanged. Use
+`g1_29dof_with_camera.xml` or `scene_29dof_with_camera.xml` only when the camera
+stream is required.
+
 ## Python Simulator (simulate_python)
 ### 1. Dependencies
 #### unitree_sdk2_python

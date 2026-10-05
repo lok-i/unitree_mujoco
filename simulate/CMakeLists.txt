@@ -24,6 +24,7 @@ link_directories(mujoco/lib)
 
 file(GLOB SIM_SRC
   src/joystick/joystick.cc
+  src/head_camera_server.cc
 
   # exclude mujoco/simulate/main.cc
   mujoco/simulate/glfw_*.cc
@@ -44,4 +45,22 @@ link_libraries(
 
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
 
+# The Unitree SDK ships its own CycloneDDS build. Prefer it over a sourced ROS
+# overlay's ABI-incompatible libddsc at runtime.
+if(UNIX AND NOT APPLE)
+  target_link_options(unitree_mujoco PRIVATE
+    "-Wl,--disable-new-dtags"
+    "-Wl,-rpath,/opt/unitree_robotics/lib")
+endif()
+
 add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(camera_integration_test test/camera_integration_test.cc)
+  target_include_directories(camera_integration_test PRIVATE src)
+  target_compile_definitions(camera_integration_test PRIVATE
+    G1_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../unitree_robots/g1")
+  target_link_libraries(camera_integration_test mujoco)
+  add_test(NAME camera_integration_test COMMAND camera_integration_test)
+endif()

@@ -37,6 +37,10 @@
 
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
 
+// The head-camera renderer owns this invisible OpenGL context from its worker
+// thread. Models without a camera named "head_cam" leave it unused.
+GLFWwindow *g_offscreen_window = nullptr;
+
 extern "C"
 {
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -691,6 +695,20 @@ int main(int argc, char **argv)
   auto sim = std::make_unique<mj::Simulate>(
     std::make_unique<mj::GlfwAdapter>(),
     &cam, &opt, &pert, /* is_passive = */ false);
+
+  GLFWwindow *main_window =
+      static_cast<mj::GlfwAdapter *>(sim->platform_ui.get())->window_;
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  g_offscreen_window =
+      glfwCreateWindow(640, 480, "head_camera", nullptr, nullptr);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+  if (g_offscreen_window != nullptr) {
+    // glfwCreateWindow changes the current context on some platforms.
+    glfwMakeContextCurrent(main_window);
+  } else {
+    std::cerr << "Warning: unable to create the head-camera OpenGL context"
+              << std::endl;
+  }
 
   std::thread unitree_thread(UnitreeSdk2BridgeThread, nullptr);
 
