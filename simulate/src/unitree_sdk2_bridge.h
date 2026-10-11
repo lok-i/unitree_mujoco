@@ -1,18 +1,20 @@
 #pragma once
 
 #include <mujoco/mujoco.h>
-
-#include <unitree/robot/channel/channel_publisher.hpp>
-#include <unitree/robot/channel/channel_subscriber.hpp>
-#include <unitree/dds_wrapper/robots/go2/go2.h>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
-#include <unitree/idl/hg/BmsState_.hpp>
-#include <unitree/idl/hg/IMUState_.hpp>
+#include <unitree/dds_wrapper/robots/go2/go2.h>
 
 #include <iostream>
+#include <unitree/idl/hg/BmsState_.hpp>
+#include <unitree/idl/hg/IMUState_.hpp>
+#include <unitree/robot/channel/channel_publisher.hpp>
+#include <unitree/robot/channel/channel_subscriber.hpp>
 
+#include "head_camera_server.h"
 #include "param.h"
 #include "physics_joystick.h"
+
+extern GLFWwindow *g_offscreen_window;
 
 #define MOTOR_SENSOR_NUM 3
 
@@ -275,6 +277,21 @@ public:
         secondary_imustate = std::make_unique<IMUState_t>("rt/secondary_imu");
     }
 
+    void start() override {
+      RobotBridge::start();
+      if (mj_name2id(mj_model_, mjOBJ_CAMERA, "head_cam") >= 0 &&
+          g_offscreen_window != nullptr) {
+        head_camera = std::make_unique<HeadCameraServer>(mj_model_, mj_data_,
+                                                         g_offscreen_window);
+        if (!head_camera->start()) {
+          std::cerr
+              << "Head camera server failed to start; continuing without camera"
+              << std::endl;
+          head_camera.reset();
+        }
+      }
+    }
+
     void run() override
     {
         RobotBridge::run();
@@ -320,4 +337,5 @@ public:
     using IMUState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::IMUState_>;
     std::unique_ptr<BmsState_t> bmsstate;
     std::unique_ptr<IMUState_t> secondary_imustate;
+    std::unique_ptr<HeadCameraServer> head_camera;
 };

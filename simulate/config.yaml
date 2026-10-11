@@ -14,3 +14,11 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 print_scene_information: 1 # Print link, joint and sensors information of robot
 
 enable_elastic_band: 0 # Virtual spring band, used for lifting h1
+
+# A model containing a camera named "head_cam" exposes an RGB-D stream over
+# TCP. Models without that camera ignore these settings.
+camera_port: 5555
+camera_fps: 30
+camera_depth: 1
+camera_depth_width: 160
+camera_depth_height: 120

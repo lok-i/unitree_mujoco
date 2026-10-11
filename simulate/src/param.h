@@ -61,6 +61,24 @@ inline struct SimulationConfig
     int enable_elastic_band;
     int band_attached_link = 0;
 
+    int camera_port = 5555;
+    int camera_fps = 30;
+    int camera_depth = 1;
+    int camera_depth_width = 160;
+    int camera_depth_height = 120;
+
+    void validate_camera() const {
+      if (camera_port < 1 || camera_port > 65535) {
+        throw std::invalid_argument("camera_port must be in [1, 65535]");
+      }
+      if (camera_fps < 1) {
+        throw std::invalid_argument("camera_fps must be positive");
+      }
+      if (camera_depth_width < 1 || camera_depth_height < 1) {
+        throw std::invalid_argument("camera depth dimensions must be positive");
+      }
+    }
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -80,6 +98,23 @@ inline struct SimulationConfig
             joystick_bits = cfg["joystick_bits"].as<int>();
             print_scene_information = cfg["print_scene_information"].as<int>();
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
+            if (cfg["camera_port"]) {
+              camera_port = cfg["camera_port"].as<int>();
+            }
+            if (cfg["camera_fps"]) {
+              camera_fps = cfg["camera_fps"].as<int>();
+            }
+            if (cfg["camera_depth"]) {
+              camera_depth = cfg["camera_depth"].as<int>();
+            }
+            if (cfg["camera_depth_width"]) {
+              camera_depth_width = cfg["camera_depth_width"].as<int>();
+            }
+            if (cfg["camera_depth_height"]) {
+              camera_depth_height = cfg["camera_depth_height"].as<int>();
+            }
+
+            validate_camera();
         }
         catch(const std::exception& e)
         {
@@ -96,19 +131,26 @@ namespace po = boost::program_options;
 inline po::variables_map helper(int argc, char** argv)
 {
     po::options_description desc("Unitree Mujoco");
-    desc.add_options()
-        ("help,h", "Show help message")
-        ("domain_id,i", po::value<int>(&config.domain_id), "DDS domain ID; -i 0")
-        ("network,n", po::value<std::string>(&config.interface), "DDS network interface; -n eth0")
-        ("robot,r", po::value<std::string>(&config.robot), "Robot type; -r go2")
-        ("scene,s", po::value<std::filesystem::path>(&config.robot_scene), "Robot scene file; -s scene_terrain.xml")
-        ("idl_type,t", po::value<int>(&config.idl_type), "DDS IDL type: -1 auto, 0 unitree_go, 1 unitree_hg")
-    ;
+    desc.add_options()("help,h", "Show help message")(
+        "domain_id,i", po::value<int>(&config.domain_id),
+        "DDS domain ID; -i 0")("network,n",
+                               po::value<std::string>(&config.interface),
+                               "DDS network interface; -n eth0")(
+        "robot,r", po::value<std::string>(&config.robot), "Robot type; -r go2")(
+        "scene,s", po::value<std::filesystem::path>(&config.robot_scene),
+        "Robot scene file; -s scene_terrain.xml")(
+        "idl_type,t", po::value<int>(&config.idl_type),
+        "DDS IDL type: -1 auto, 0 unitree_go, 1 unitree_hg")(
+        "camera_port", po::value<int>(&config.camera_port),
+        "Head-camera TCP port")("camera_fps",
+                                po::value<int>(&config.camera_fps),
+                                "Head-camera frame rate");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);
-    
+    config.validate_camera();
+
     if (vm.count("help"))
     {
         std::cout << desc << std::endl;
@@ -118,4 +160,4 @@ inline po::variables_map helper(int argc, char** argv)
     return vm;
 }
 
-}
+}  // namespace param
