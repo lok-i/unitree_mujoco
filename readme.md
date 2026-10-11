@@ -54,12 +54,16 @@ sudo make install
 For more details, see: https://github.com/unitreerobotics/unitree_sdk2
 #### mujoco
 
-Download the mujoco [release](https://github.com/google-deepmind/mujoco/releases), and extract it to the `~/.mujoco` directory;
+Download the pinned MuJoCo 3.3.6 binary and its matching viewer sources:
 
+```bash
+cd unitree_mujoco
+./scripts/setup_mujoco.sh
 ```
-cd unitree_mujoco/simulate/
-ln -s ~/.mujoco/mujoco-3.3.6 mujoco
-```
+
+The script supports Linux x86_64 and AArch64, verifies both downloads, installs
+under `~/.mujoco` by default, and links `simulate/mujoco`. Use
+`--install-dir PATH` to choose another location.
 
 ### 2. Compile unitree_mujoco
 ```bash
@@ -97,7 +101,9 @@ Use `scene_terrain.xml` instead for the rough-terrain scene.
 ### G1 head-camera stream
 
 The C++ simulator includes an opt-in G1 model with Vibe's downward-facing
-`head_cam`. From `simulate/build`, run:
+`head_cam` and collidable rubber-hand meshes. The hand contacts are needed for
+the cube-interaction behavior while the standard upstream G1 model remains
+unchanged. From `simulate/build`, run:
 
 ```bash
 ./unitree_mujoco -r g1 -s scene_29dof_with_camera.xml
@@ -112,7 +118,7 @@ common settings.
 
 The standard `g1_29dof.xml` and `scene_29dof.xml` remain unchanged. Use
 `g1_29dof_with_camera.xml` or `scene_29dof_with_camera.xml` only when the camera
-stream is required.
+stream and rubber-hand contacts are required.
 
 ## Python Simulator (simulate_python)
 ### 1. Dependencies
@@ -185,6 +191,10 @@ print_scene_information: 1
 # Mainly used to simulate the hanging process of H1 robot initialization
 enable_elastic_band: 0 # For H1
 ```
+Joystick input is enabled by default. To run temporarily without a controller,
+pass `--use_joystick 0`; `--joystick_device /dev/input/jsN` overrides the device
+without editing `config.yaml`.
+
 ### Python Simulator
 The configuration file for the Python simulator is located at `/simulate_python/config.py`:
 ```python

@@ -141,6 +141,10 @@ inline po::variables_map helper(int argc, char** argv)
         "Robot scene file; -s scene_terrain.xml")(
         "idl_type,t", po::value<int>(&config.idl_type),
         "DDS IDL type: -1 auto, 0 unitree_go, 1 unitree_hg")(
+        "use_joystick", po::value<int>(&config.use_joystick),
+        "Enable joystick input: 0 or 1")(
+        "joystick_device", po::value<std::string>(&config.joystick_device),
+        "Joystick device; --joystick_device /dev/input/js0")(
         "camera_port", po::value<int>(&config.camera_port),
         "Head-camera TCP port")("camera_fps",
                                 po::value<int>(&config.camera_fps),
