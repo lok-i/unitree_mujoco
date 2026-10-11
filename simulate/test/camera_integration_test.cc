@@ -25,11 +25,17 @@ ModelPtr LoadModel(const std::string &path) {
   return model;
 }
 
-bool CheckEquivalentDynamics(const mjModel &base, const mjModel &camera) {
+bool CheckCompatibleModel(const mjModel &base, const mjModel &camera) {
   return base.nq == camera.nq && base.nv == camera.nv && base.nu == camera.nu &&
          base.nbody == camera.nbody && base.njnt == camera.njnt &&
-         base.nsensor == camera.nsensor && base.ngeom == camera.ngeom &&
+         base.nsensor == camera.nsensor && camera.ngeom == base.ngeom + 2 &&
          base.nmesh == camera.nmesh && camera.ncam == base.ncam + 1;
+}
+
+bool CheckHandCollision(const mjModel &model, const char *name) {
+  const int id = mj_name2id(&model, mjOBJ_GEOM, name);
+  return id >= 0 && model.geom_type[id] == mjGEOM_MESH &&
+         model.geom_contype[id] != 0 && model.geom_conaffinity[id] != 0;
 }
 
 bool CheckWireRecord() {
@@ -61,13 +67,18 @@ int main() {
   if (!base || !camera) {
     return 1;
   }
-  if (!CheckEquivalentDynamics(*base, *camera)) {
-    std::cerr << "Camera model changes the G1 dynamics or topology"
+  if (!CheckCompatibleModel(*base, *camera)) {
+    std::cerr << "Vibe G1 model has unexpected dynamics or topology"
               << std::endl;
     return 1;
   }
   if (mj_name2id(camera.get(), mjOBJ_CAMERA, "head_cam") < 0) {
     std::cerr << "Camera model has no head_cam" << std::endl;
+    return 1;
+  }
+  if (!CheckHandCollision(*camera, "left_rubber_hand_collision") ||
+      !CheckHandCollision(*camera, "right_rubber_hand_collision")) {
+    std::cerr << "Vibe G1 model has no collidable rubber hands" << std::endl;
     return 1;
   }
   if (!CheckWireRecord()) {
