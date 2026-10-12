@@ -11,6 +11,9 @@ endif()
 
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
+# Keep the simulator on the DDS library belonging to the selected SDK.
+get_target_property(UNITREE_DDS_LIBRARY ddsc IMPORTED_LOCATION)
+get_filename_component(UNITREE_DDS_LIBRARY_DIR "${UNITREE_DDS_LIBRARY}" DIRECTORY)
 find_package(Boost REQUIRED COMPONENTS program_options)
 
 set(MUJOCO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/mujoco" CACHE PATH
@@ -73,7 +76,7 @@ target_link_libraries(unitree_mujoco PRIVATE
 if(UNIX AND NOT APPLE)
   target_link_options(unitree_mujoco PRIVATE
     "-Wl,--disable-new-dtags"
-    "-Wl,-rpath,/opt/unitree_robotics/lib"
+    "-Wl,-rpath,${UNITREE_DDS_LIBRARY_DIR}"
     "-Wl,-rpath,${MUJOCO_LIBRARY_DIR}")
 endif()
 
