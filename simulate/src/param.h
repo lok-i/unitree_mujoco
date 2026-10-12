@@ -64,8 +64,12 @@ inline struct SimulationConfig
     int camera_port = 5555;
     int camera_fps = 30;
     int camera_depth = 1;
-    int camera_depth_width = 160;
-    int camera_depth_height = 120;
+    int camera_textures = 1;
+    int camera_visual_groups = 0;
+    int camera_width = 112;
+    int camera_height = 63;
+    int camera_depth_width = 112;
+    int camera_depth_height = 63;
 
     void validate_camera() const {
       if (camera_port < 1 || camera_port > 65535) {
@@ -74,8 +78,10 @@ inline struct SimulationConfig
       if (camera_fps < 1) {
         throw std::invalid_argument("camera_fps must be positive");
       }
-      if (camera_depth_width < 1 || camera_depth_height < 1) {
-        throw std::invalid_argument("camera depth dimensions must be positive");
+      for (int size : {camera_width, camera_height, camera_depth_width, camera_depth_height}) {
+        if (size < 1 || size > 4096) {
+          throw std::invalid_argument("camera dimensions must be in [1, 4096]");
+        }
       }
     }
 
@@ -104,6 +110,10 @@ inline struct SimulationConfig
             if (cfg["camera_fps"]) {
               camera_fps = cfg["camera_fps"].as<int>();
             }
+            if (cfg["camera_width"]) camera_width = cfg["camera_width"].as<int>();
+            if (cfg["camera_height"]) camera_height = cfg["camera_height"].as<int>();
+            if (cfg["camera_textures"]) camera_textures = cfg["camera_textures"].as<int>();
+            if (cfg["camera_visual_groups"]) camera_visual_groups = cfg["camera_visual_groups"].as<int>();
             if (cfg["camera_depth"]) {
               camera_depth = cfg["camera_depth"].as<int>();
             }
@@ -148,7 +158,14 @@ inline po::variables_map helper(int argc, char** argv)
         "camera_port", po::value<int>(&config.camera_port),
         "Head-camera TCP port")("camera_fps",
                                 po::value<int>(&config.camera_fps),
-                                "Head-camera frame rate");
+                                "Head-camera frame rate")("camera_width", po::value<int>(&config.camera_width),
+        "Head-camera render width")("camera_height", po::value<int>(&config.camera_height),
+        "Head-camera render height")("camera_depth_width", po::value<int>(&config.camera_depth_width),
+        "Depth plane width")("camera_depth_height", po::value<int>(&config.camera_depth_height),
+        "Depth plane height")("camera_textures", po::value<int>(&config.camera_textures),
+        "Enable head-camera textures (0 for Repose)")("camera_visual_groups",
+        po::value<int>(&config.camera_visual_groups),
+        "Use public Vibe visual groups 0/2 (1 for generated Repose)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);

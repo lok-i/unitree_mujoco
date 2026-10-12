@@ -20,7 +20,10 @@ namespace wire = unitree_mujoco::camera_wire;
 
 HeadCameraServer::HeadCameraServer(mjModel *model, mjData *data,
                                    GLFWwindow *window)
-    : model_(model), data_(data), window_(window) {}
+    : color_width_(param::config.camera_width),
+      color_height_(param::config.camera_height),
+      model_(model), data_(data), window_(window),
+      viewport_{0, 0, color_width_, color_height_} {}
 
 HeadCameraServer::~HeadCameraServer() { stop(); }
 
@@ -38,8 +41,8 @@ bool HeadCameraServer::start() {
   camera_thread_ = std::thread(&HeadCameraServer::cameraLoop, this);
 
   std::cout << "Head camera TCP server listening on port "
-            << param::config.camera_port << " (" << kColorWidth << "x"
-            << kColorHeight << " PNG, " << param::config.camera_fps << " fps)"
+            << param::config.camera_port << " (" << color_width_ << "x"
+            << color_height_ << " PNG, " << param::config.camera_fps << " fps)"
             << std::endl;
   return true;
 }
@@ -84,16 +87,23 @@ bool HeadCameraServer::initializeCamera() {
   mjv_makeScene(model_, &scene_, 2000);
   mjr_defaultContext(&context_);
   mjr_makeContext(model_, &context_, mjFONTSCALE_100);
+  mjr_resizeOffscreen(color_width_, color_height_, &context_);
+  scene_.flags[mjRND_SHADOW] = 0;
 
   mjv_defaultCamera(&camera_);
   camera_.type = mjCAMERA_FIXED;
   camera_.fixedcamid = camera_id_;
   mjv_defaultOption(&option_);
+  option_.flags[mjVIS_TEXTURE] = param::config.camera_textures != 0;
+  if (param::config.camera_visual_groups != 0) {
+    std::fill(std::begin(option_.geomgroup), std::end(option_.geomgroup), 0);
+    option_.geomgroup[0] = option_.geomgroup[2] = 1;
+  }
 
-  rgb_bottom_up_.resize(kColorWidth * kColorHeight * 3);
-  rgb_top_down_.resize(kColorWidth * kColorHeight * 3);
+  rgb_bottom_up_.resize(color_width_ * color_height_ * 3);
+  rgb_top_down_.resize(color_width_ * color_height_ * 3);
   if (param::config.camera_depth != 0) {
-    depth_buffer_.resize(kColorWidth * kColorHeight);
+    depth_buffer_.resize(color_width_ * color_height_);
     depth_millimeters_.resize(param::config.camera_depth_width *
                               param::config.camera_depth_height);
   }
@@ -165,16 +175,16 @@ void HeadCameraServer::renderCamera() {
                  include_depth ? depth_buffer_.data() : nullptr, viewport_,
                  &context_);
 
-  constexpr size_t row_bytes = kColorWidth * 3;
-  for (int row = 0; row < kColorHeight; ++row) {
+  const size_t row_bytes = color_width_ * 3;
+  for (int row = 0; row < color_height_; ++row) {
     std::memcpy(rgb_top_down_.data() + row * row_bytes,
-                rgb_bottom_up_.data() + (kColorHeight - 1 - row) * row_bytes,
+                rgb_bottom_up_.data() + (color_height_ - 1 - row) * row_bytes,
                 row_bytes);
   }
 
   std::vector<unsigned char> png;
-  const unsigned png_error = lodepng::encode(png, rgb_top_down_, kColorWidth,
-                                             kColorHeight, LCT_RGB, 8);
+  const unsigned png_error = lodepng::encode(png, rgb_top_down_, color_width_,
+                                             color_height_, LCT_RGB, 8);
   if (png_error != 0) {
     std::cerr << "Head camera PNG encode failed: "
               << lodepng_error_text(png_error) << std::endl;
@@ -186,12 +196,12 @@ void HeadCameraServer::renderCamera() {
     payload.assign(png.begin(), png.end());
   } else {
     const float fovy = static_cast<float>(model_->cam_fovy[camera_id_]);
-    const float fy = (kColorHeight / 2.0f) /
+    const float fy = (color_height_ / 2.0f) /
                      std::tan(fovy * static_cast<float>(mjPI) / 360.0f);
     payload = wire::BeginPayload(2);
     wire::AppendPlane(payload, wire::Kind::kColor, wire::Format::kPng,
-                      kColorWidth, kColorHeight, fy, fy, kColorWidth / 2.0f,
-                      kColorHeight / 2.0f, png.data(),
+                      color_width_, color_height_, fy, fy, color_width_ / 2.0f,
+                      color_height_ / 2.0f, png.data(),
                       static_cast<uint32_t>(png.size()));
     appendDepthPlane(payload, fy);
   }
@@ -208,12 +218,12 @@ void HeadCameraServer::appendDepthPlane(std::vector<uint8_t> &payload,
   const float far_plane = extent * static_cast<float>(model_->vis.map.zfar);
 
   for (int row = 0; row < height; ++row) {
-    const int source_y = (row * kColorHeight) / height;
-    const int buffer_y = kColorHeight - 1 - source_y;
+    const int source_y = (row * color_height_) / height;
+    const int buffer_y = color_height_ - 1 - source_y;
     for (int column = 0; column < width; ++column) {
-      const int source_x = (column * kColorWidth) / width;
+      const int source_x = (column * color_width_) / width;
       const float normalized_depth =
-          depth_buffer_[buffer_y * kColorWidth + source_x];
+          depth_buffer_[buffer_y * color_width_ + source_x];
       const float meters =
           near_plane * far_plane /
           (far_plane - normalized_depth * (far_plane - near_plane));
@@ -223,11 +233,12 @@ void HeadCameraServer::appendDepthPlane(std::vector<uint8_t> &payload,
     }
   }
 
-  const float scale = static_cast<float>(width) / kColorWidth;
+  const float scale_x = static_cast<float>(width) / color_width_;
+  const float scale_y = static_cast<float>(height) / color_height_;
   wire::AppendPlane(
       payload, wire::Kind::kDepth, wire::Format::kRawU16Millimeters,
       static_cast<uint16_t>(width), static_cast<uint16_t>(height),
-      color_fy * scale, color_fy * scale, width / 2.0f, height / 2.0f,
+      color_fy * scale_x, color_fy * scale_y, width / 2.0f, height / 2.0f,
       depth_millimeters_.data(),
       static_cast<uint32_t>(depth_millimeters_.size() * sizeof(uint16_t)));
 }
