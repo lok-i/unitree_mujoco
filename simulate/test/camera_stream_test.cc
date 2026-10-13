@@ -44,10 +44,6 @@ int main(int argc, char **argv) {
   if (!window) { glfwTerminate(); return 77; }
   char error[1024] = {};
   const char *model_path = argc > 1 ? argv[1] : G1_MODEL_DIR "/g1_29dof_with_camera.xml";
-  if (argc > 1) {
-    param::config.camera_visual_groups = 1;
-    param::config.camera_textures = 0;
-  }
   mjModel *model = mj_loadXML(model_path, nullptr,
                             error, sizeof(error));
   if (!model) { std::cerr << error; return 1; }

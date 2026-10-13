@@ -1,5 +1,5 @@
-robot: "go2"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1", "h2", "as2"
-robot_scene: "scene.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
+robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1", "h2", "as2"
+robot_scene: "scene_29dof_with_camera.xml" # Relative to unitree_robots/[robot]/
 
 domain_id: 1  # Domain id
 interface: "lo" # Interface 
@@ -18,9 +18,11 @@ enable_elastic_band: 0 # Virtual spring band, used for lifting h1
 # A model containing a camera named "head_cam" exposes an RGB-D stream over
 # TCP. Models without that camera ignore these settings.
 camera_port: 5555
-camera_fps: 30
+camera_fps: 50
 camera_depth: 1
-# Match the native Vibe policy camera (16:9); no intermediate resize.
+camera_textures: 0
+camera_visual_groups: 1  # Render geom groups 0 and 2
+# Match the native ViBe policy camera (16:9); no intermediate resize.
 camera_width: 112
 camera_height: 63
 camera_depth_width: 112
