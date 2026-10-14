@@ -21,8 +21,8 @@ class HeadCameraServer {
   bool start();
 
  private:
-  static constexpr int kColorWidth = 640;
-  static constexpr int kColorHeight = 480;
+  int color_width_;
+  int color_height_;
 
   bool startTcpServer();
   bool initializeCamera();
@@ -42,7 +42,7 @@ class HeadCameraServer {
   mjvCamera camera_{};
   mjvOption option_{};
   mjrContext context_{};
-  mjrRect viewport_{0, 0, kColorWidth, kColorHeight};
+  mjrRect viewport_{};
 
   std::vector<unsigned char> rgb_bottom_up_;
   std::vector<unsigned char> rgb_top_down_;

@@ -100,25 +100,21 @@ Use `scene_terrain.xml` instead for the rough-terrain scene.
 
 ### G1 head-camera stream
 
-The C++ simulator includes an opt-in G1 model with Vibe's downward-facing
-`head_cam` and collidable rubber-hand meshes. The hand contacts are needed for
-the cube-interaction behavior while the standard upstream G1 model remains
-unchanged. From `simulate/build`, run:
+The C++ simulator defaults to the flat G1 camera scene, with ViBe's downward-facing
+42.5-degree `head_cam` and collidable rubber hands. From `simulate/build`:
 
 ```bash
-./unitree_mujoco -r g1 -s scene_29dof_with_camera.xml
+./unitree_mujoco
+./unitree_mujoco -s /path/to/scene.xml  # choose a task scene
 ```
 
-When the selected model contains `head_cam`, the simulator listens on TCP port
-`5555` and emits 640x480 lossless RGB plus 160x120 depth in millimeters. The
-stream uses a length-prefixed, self-describing `VD1` record and has no build-time
-dependency on the consumer. Port, frame rate, and depth dimensions are set in
-`simulate/config.yaml`; `--camera_port` and `--camera_fps` override the two most
-common settings.
+Defaults: DDS domain 1 on `lo`, gamepad enabled, 112×63 RGB and depth at 50 FPS,
+camera textures off, and visual geom groups 0/2. Edit `simulate/config.yaml` or
+use CLI overrides. For another robot, pass both `-r` and `-s`.
 
-The standard `g1_29dof.xml` and `scene_29dof.xml` remain unchanged. Use
-`g1_29dof_with_camera.xml` or `scene_29dof_with_camera.xml` only when the camera
-stream and rubber-hand contacts are required.
+Models with `head_cam` stream lossless RGB and depth in millimeters on TCP port
+5555, using length-prefixed `VD1` records. Models without that camera skip streaming.
+Use `-s scene_29dof.xml` for the standard G1 model without the camera/rubber hands.
 
 ## Python Simulator (simulate_python)
 ### 1. Dependencies
@@ -167,10 +163,9 @@ The configuration file for the C++ simulator is located at `/simulate/config.yam
 ```yaml
 # Robot name loaded by the simulator
 # "go2", "b2", "b2w", "h1", "go2w", "g1", "h2", "as2"
-robot: "go2"
-# Robot simulation scene file
-# For example, for go2, it refers to the scene.xml file in the /unitree_robots/go2/ folder
-robot_scene: "scene.xml"
+robot: "g1"
+# Scene under unitree_robots/g1; -s also accepts an absolute path
+robot_scene: "scene_29dof_with_camera.xml"
 # DDS domain id, it is recommended to distinguish from the real robot (default is 0 on the real robot)
 domain_id: 1
 

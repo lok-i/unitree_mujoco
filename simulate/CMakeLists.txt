@@ -11,6 +11,9 @@ endif()
 
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
+# Keep the simulator on the DDS library belonging to the selected SDK.
+get_target_property(UNITREE_DDS_LIBRARY ddsc IMPORTED_LOCATION)
+get_filename_component(UNITREE_DDS_LIBRARY_DIR "${UNITREE_DDS_LIBRARY}" DIRECTORY)
 find_package(Boost REQUIRED COMPONENTS program_options)
 
 set(MUJOCO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/mujoco" CACHE PATH
@@ -73,7 +76,7 @@ target_link_libraries(unitree_mujoco PRIVATE
 if(UNIX AND NOT APPLE)
   target_link_options(unitree_mujoco PRIVATE
     "-Wl,--disable-new-dtags"
-    "-Wl,-rpath,/opt/unitree_robotics/lib"
+    "-Wl,-rpath,${UNITREE_DDS_LIBRARY_DIR}"
     "-Wl,-rpath,${MUJOCO_LIBRARY_DIR}")
 endif()
 
@@ -99,4 +102,17 @@ if(BUILD_TESTING)
     G1_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../unitree_robots/g1")
   target_link_libraries(camera_integration_test PRIVATE ${MUJOCO_LIBRARY})
   add_test(NAME camera_integration_test COMMAND camera_integration_test)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(camera_stream_test test/camera_stream_test.cc
+    src/head_camera_server.cc src/lodepng/lodepng.cpp)
+  target_include_directories(camera_stream_test PRIVATE
+    ${MUJOCO_INCLUDE_DIR} src src/lodepng)
+  target_compile_definitions(camera_stream_test PRIVATE
+    G1_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../unitree_robots/g1")
+  target_link_libraries(camera_stream_test PRIVATE
+    ${MUJOCO_LIBRARY} glfw pthread yaml-cpp boost_program_options)
+  add_test(NAME camera_stream_test COMMAND camera_stream_test)
+  set_tests_properties(camera_stream_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
 endif()
